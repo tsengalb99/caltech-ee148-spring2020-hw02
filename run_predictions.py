@@ -43,39 +43,60 @@ def predict_boxes(heatmap):
     confidence scores.
     '''
 
-    output = []
+    def kmeans(data, k):
+        mn = np.mean(data, 0)
+        st = np.std(data, 0)
+        data = (data - mn)/st
+        np.random.shuffle(data)
+        centers = data[:k]
 
-    '''
-    BEGIN YOUR CODE
-    '''
+        for i in range(500):
+            dist = (data[:, :, None] - np.transpose(centers)[None, :, :])**2
+            cls = np.argmin(np.sum(dist, axis=1), axis=1)
+            nc = []
+            for j in range(k):
+                nc.append(np.mean(data[cls == j, :], axis=0))
+            nc = np.array(nc)
+            if (nc == centers).all():
+                break
+            centers = nc
+
+        dist = (data[:, :, None] - np.transpose(centers)[None, :, :])**2
+        cls = np.argmin(np.sum(dist, axis=1), axis=1)
+
+        conf = []
+        for i in range(len(cls)):
+            dists = dist[np.where(cls == i)]
+            md = np.median(dists)
+            conf.append(len(dists)/md)
+        
+        centers = centers * st + mn
+        return list(centers), conf
+
+    points = []
+    for i in range(len(heatmap)):
+        for j in range(len(heatmap[i])):
+            r = heatmap[i, j, 0]
+            g = heatmap[i, j, 1]
+            b = heatmap[i, j, 2]
+            if r > 0.6 and g < 0.7 * r and b < 0.7 * r:
+                points.append([i, j])
+
+    points = np.array(points)
+    if len(points) <= 20:
+        # don't do anything if 20 px or less)
+        return [], []
+
+    bbox = []
+    ctrs, conf = kmeans(points, 6)
+    bsize = (6, 16)
+    for c in range(len(ctrs)):
+        center = ctrs[c]
+        bbox.append(([center[1] - bsize[0]/2, center[0] - bsize[1]/6,
+                     center[1] + bsize[0]/2, center[0] + 5*bsize[1]/6], conf[c]))
     
-    '''
-    As an example, here's code that generates between 1 and 5 random boxes
-    of fixed size and returns the results in the proper format.
-    '''
+    return bbox
 
-    box_height = 8
-    box_width = 6
-
-    num_boxes = np.random.randint(1,5)
-
-    for i in range(num_boxes):
-        (n_rows,n_cols,n_channels) = np.shape(I)
-
-        tl_row = np.random.randint(n_rows - box_height)
-        tl_col = np.random.randint(n_cols - box_width)
-        br_row = tl_row + box_height
-        br_col = tl_col + box_width
-
-        score = np.random.random()
-
-        output.append([tl_row,tl_col,br_row,br_col, score])
-
-    '''
-    END YOUR CODE
-    '''
-
-    return output
 
 
 def detect_red_light_mf(I):
