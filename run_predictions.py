@@ -3,7 +3,7 @@ import numpy as np
 import json
 from PIL import Image
 
-def compute_convolution(I, T, stride=None):
+def compute_convolution(I, T, stride=1, padding=0):
     '''
     This function takes an image <I> and a template <T> (both numpy arrays) 
     and returns a heatmap where each grid represents the output produced by 
@@ -12,16 +12,29 @@ def compute_convolution(I, T, stride=None):
     '''
     (n_rows,n_cols,n_channels) = np.shape(I)
 
-    '''
-    BEGIN YOUR CODE
-    '''
-    heatmap = np.random.random((n_rows, n_cols))
 
-    '''
-    END YOUR CODE
-    '''
+    # pad I
+    zs = I.shape
+    zs = (zs[0] + 2 * padding, zs[1] + 2 * padding, zs[2])
+    padded = np.zeros(zs)
+    padded[padding : I.shape[0] + padding, padding : I.shape[1] + padding, :] = I
 
-    return heatmap
+    fc1 = T[:, :, 0].flatten()
+    fc2 = T[:, :, 1].flatten()
+    fc3 = T[:, :, 2].flatten()
+    
+    heatmap = []
+    for i in range(0, len(padded) - len(T), stride):
+        tmp = []
+        for j in range(0, len(padded[i]) - len(T[i]), stride):
+            cur = padded[i:i + len(T), j:j + len(T[i])]
+            c1 = np.dot(cur[:, :, 0].flatten(), fc1)
+            c2 = np.dot(cur[:, :, 1].flatten(), fc2)
+            c3 = np.dot(cur[:, :, 2].flatten(), fc3)
+            tmp.append([c1, c2, c3])
+        heatmap.append(tmp)
+
+    return np.array(heatmap)
 
 
 def predict_boxes(heatmap):
