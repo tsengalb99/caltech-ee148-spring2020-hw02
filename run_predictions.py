@@ -1,7 +1,10 @@
 import os
 import numpy as np
 import json
-from PIL import Image
+from PIL import Image, ImageDraw
+from multiprocessing import Pool
+import multiprocessing as mp
+import matplotlib.pyplot as plt
 
 def compute_convolution(I, T, stride=1, padding=0):
     '''
@@ -10,28 +13,22 @@ def compute_convolution(I, T, stride=1, padding=0):
     convolution at each location. You can add optional parameters (e.g. stride, 
     window_size, padding) to create additional functionality. 
     '''
-    (n_rows,n_cols,n_channels) = np.shape(I)
-
 
     # pad I
     zs = I.shape
-    zs = (zs[0] + 2 * padding, zs[1] + 2 * padding, zs[2])
+    zs = (zs[0] + 2 * padding, zs[1] + 2 * padding)
     padded = np.zeros(zs)
-    padded[padding : I.shape[0] + padding, padding : I.shape[1] + padding, :] = I
+    padded[padding : I.shape[0] + padding, padding : I.shape[1] + padding] = I
 
-    fc1 = T[:, :, 0].flatten()
-    fc2 = T[:, :, 1].flatten()
-    fc3 = T[:, :, 2].flatten()
-    
+    fc1 = T[:, :].flatten()
+
     heatmap = []
     for i in range(0, len(padded) - len(T), stride):
         tmp = []
-        for j in range(0, len(padded[i]) - len(T[i]), stride):
-            cur = padded[i:i + len(T), j:j + len(T[i])]
-            c1 = np.dot(cur[:, :, 0].flatten(), fc1)
-            c2 = np.dot(cur[:, :, 1].flatten(), fc2)
-            c3 = np.dot(cur[:, :, 2].flatten(), fc3)
-            tmp.append([c1, c2, c3])
+        for j in range(0, len(padded[i]) - len(T[0]), stride):
+            cur = padded[i:i + len(T), j:j + len(T[0])]
+            c1 = np.dot(cur[:, :].flatten(), fc1)
+            tmp.append(c1)
         heatmap.append(tmp)
 
     return np.array(heatmap)
@@ -65,10 +62,15 @@ def predict_boxes(heatmap):
         cls = np.argmin(np.sum(dist, axis=1), axis=1)
 
         conf = []
-        for i in range(len(cls)):
-            dists = dist[np.where(cls == i)]
-            md = np.median(dists)
-            conf.append(len(dists)/md)
+        for i in range(k):
+            dists = []
+            for j in range(len(cls)):
+                if cls[j] == i:
+                    dists.append(dist[j])
+            md = np.median(dists) + 1e-2
+            std = np.std(dists) + 1e-2
+            coeff = 2/(1 + np.exp(-2.5/(std*md))) - 1
+            conf.append(max(min(1, coeff), 0))
         
         centers = centers * st + mn
         return list(centers), conf
@@ -76,30 +78,28 @@ def predict_boxes(heatmap):
     points = []
     for i in range(len(heatmap)):
         for j in range(len(heatmap[i])):
-            r = heatmap[i, j, 0]
-            g = heatmap[i, j, 1]
-            b = heatmap[i, j, 2]
-            if r > 0.6 and g < 0.7 * r and b < 0.7 * r:
-                points.append([i, j])
-
+            if heatmap[i][j] > 0.9:
+                points.append((i, j))
+        
     points = np.array(points)
-    if len(points) <= 20:
+    if len(points) <= 30:
         # don't do anything if 20 px or less)
-        return [], []
+        return []
 
     bbox = []
-    ctrs, conf = kmeans(points, 6)
-    bsize = (6, 16)
+    ctrs, conf = kmeans(points, 15)
+    bsize = (10, 10)
     for c in range(len(ctrs)):
         center = ctrs[c]
-        bbox.append(([center[1] - bsize[0]/2, center[0] - bsize[1]/6,
-                     center[1] + bsize[0]/2, center[0] + 5*bsize[1]/6], conf[c]))
+        bbox.append([center[1] - bsize[0]/2, center[0] - bsize[1]/2,
+                     center[1] + bsize[0]/2, center[0] + bsize[1]/2, conf[c]])
     
     return bbox
 
+def normalize(I):
+    return (I - np.min(I))/(np.max(I) - np.min(I))
 
-
-def detect_red_light_mf(I):
+def detect_red_light_mf(I, fname, ftr):
     '''
     This function takes a numpy array <I> and returns a list <output>.
     The length of <output> is the number of bounding boxes predicted for <I>. 
@@ -115,21 +115,16 @@ def detect_red_light_mf(I):
     I[:,:,2] is the blue channel
     '''
 
-    '''
-    BEGIN YOUR CODE
-    '''
-    template_height = 8
-    template_width = 6
-
-    # You may use multiple stages and combine the results
-    T = np.random.random((template_height, template_width))
-
-    heatmap = compute_convolution(I, T)
+    I = normalize(I[:, :, 0])
+    
+    heatmap = normalize(compute_convolution(I, ftr[:, :, 0]))
+    iters = 1
+    for it in range(iters):
+        heatmap = normalize(compute_convolution(heatmap, ftr[:, :, 0]))
+    hmg = heatmap * 255
+    tmp = Image.fromarray(hmg.astype(np.uint8), 'L')
+    tmp.save(fname)
     output = predict_boxes(heatmap)
-
-    '''
-    END YOUR CODE
-    '''
 
     for i in range(len(output)):
         assert len(output[i]) == 5
@@ -144,7 +139,7 @@ data_path = '../data/RedLights2011_Medium'
 # load splits: 
 split_path = '../data/hw02_splits'
 file_names_train = np.load(os.path.join(split_path,'file_names_train.npy'))
-file_names_test = np.load(os.path.join(split_Path,'file_names_test.npy'))
+file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
 
 # set a path for saving predictions:
 preds_path = '../data/hw02_preds'
@@ -157,15 +152,29 @@ done_tweaking = False
 Make predictions on the training set.
 '''
 preds_train = {}
-for i in range(len(file_names_train)):
 
+ftr = Image.open('f2.png').resize((10, 10))
+ftr = np.asarray(ftr)
+
+def fnametmt(fname):
+    global ftr
     # read image using PIL:
-    I = Image.open(os.path.join(data_path,file_names_train[i]))
-
+    I = Image.open(os.path.join(data_path, fname))
     # convert to numpy array:
-    I = np.asarray(I)
+    rdraw = ImageDraw.Draw(I)
+    boxes = detect_red_light_mf(np.asarray(I), fname, ftr)
+        
+    for rc in boxes:
+        rdraw.rectangle(rc[0:4], outline=(0, 0, int(rc[4]*255)))
+    I.save(os.path.join(preds_path, fname))
+    return boxes
 
-    preds_train[file_names_train[i]] = detect_red_light_mf(I)
+
+p = Pool(mp.cpu_count())
+tmp = p.map(fnametmt, file_names_train)
+for i in range(len(file_names_train)):
+    name = file_names_train[i]
+    preds_train[name] = tmp[i]
 
 # save preds (overwrites any previous predictions!)
 with open(os.path.join(preds_path,'preds_train.json'),'w') as f:
@@ -181,10 +190,7 @@ if done_tweaking:
         # read image using PIL:
         I = Image.open(os.path.join(data_path,file_names_test[i]))
 
-        # convert to numpy array:
-        I = np.asarray(I)
-
-        preds_test[file_names_test[i]] = detect_red_light_mf(I)
+        preds_test[file_names_test[i]] = detect_red_light_mf(np.asarray(I))
 
     # save preds (overwrites any previous predictions!)
     with open(os.path.join(preds_path,'preds_test.json'),'w') as f:
