@@ -25,7 +25,7 @@ def compute_iou(box_1, box_2):
     return 0
 
 
-def compute_counts(preds, gts, iou_thr=0.5, conf_thr=0.5):
+def compute_counts(preds, gts, iou_thr, conf_thr):
     '''
     This function takes a pair of dictionaries (with our JSON format; see ex.) 
     corresponding to predicted and ground truth bounding boxes for a collection
@@ -45,25 +45,26 @@ def compute_counts(preds, gts, iou_thr=0.5, conf_thr=0.5):
         gt = gts[fname]
 
         mbox = [False for _ in range(len(boxes))]
-            
+        mgt = [False for _ in range(len(gt))]
+        
         for i in range(len(gt)):
-            match = False
-
             for j in range(len(boxes)):
                 if boxes[j][4] < conf_thr:
+                    mbox[j] = True
                     continue
                 iou = compute_iou(gt[i], boxes[j][:4])
                 if iou > iou_thr:
-                    match = True
+                    TP += 1
                     mbox[j] = True
-            if match:
-                TP += 1
-            else:
-                FN += 1
+                    mgt[i] = True
         for i in mbox:
-            if not i:
+            if i == False:
                 FP += 1
+        for i in mgt:
+            if i == False:
+                FN += 1
 
+    print(TP, FP, FN)
     return TP, FP, FN
 
 # set a path for predictions and annotations:
@@ -109,19 +110,24 @@ for fname in preds_train:
         total.append(i[4])
 
 confidence_thrs = np.array(sorted(list(set(total))))#np.sort(np.array([preds_train[fname][4] for fname in preds_train],dtype=float)) # using (ascending) list of confidence scores as thresholds
+plt.plot(confidence_thrs)
 tp_train = np.zeros(len(confidence_thrs))
 fp_train = np.zeros(len(confidence_thrs))
 fn_train = np.zeros(len(confidence_thrs))
 for i, conf_thr in enumerate(confidence_thrs):
-    tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=0.25, conf_thr=conf_thr)
+    print(conf_thr)
+    tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=0.0, conf_thr=conf_thr)
     
 # Plot training set PR curves
 P = []
 R = []
+
 for i in range(len(confidence_thrs)):
     P.append(tp_train[i]/(tp_train[i] + fp_train[i]))
     R.append(tp_train[i]/(tp_train[i] + fn_train[i]))
 
+plt.clf()
+plt.cla()
 plt.plot(R, P)
 plt.savefig('test.png')
 

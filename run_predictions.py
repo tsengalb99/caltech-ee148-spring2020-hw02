@@ -6,7 +6,7 @@ from multiprocessing import Pool
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 
-def compute_convolution(I, T, stride=1, padding=0):
+def compute_convolution(I, T, stride=1):
     '''
     This function takes an image <I> and a template <T> (both numpy arrays) 
     and returns a heatmap where each grid represents the output produced by 
@@ -14,21 +14,22 @@ def compute_convolution(I, T, stride=1, padding=0):
     window_size, padding) to create additional functionality. 
     '''
 
-    # pad I
-    zs = I.shape
-    zs = (zs[0] + 2 * padding, zs[1] + 2 * padding)
-    padded = np.zeros(zs)
-    padded[padding : I.shape[0] + padding, padding : I.shape[1] + padding] = I
-
-    fc1 = T[:, :].flatten()
+    I = I.astype(np.uint32)
+    T = T.astype(np.uint32)
+    
+    fc1 = T[:, :, 0].flatten()
+    fc2 = T[:, :, 1].flatten()
+    fc3 = T[:, :, 2].flatten()
 
     heatmap = []
-    for i in range(0, len(padded) - len(T), stride):
+    for i in range(0, len(I) - len(T), stride):
         tmp = []
-        for j in range(0, len(padded[i]) - len(T[0]), stride):
-            cur = padded[i:i + len(T), j:j + len(T[0])]
-            c1 = np.dot(cur[:, :].flatten(), fc1)
-            tmp.append(c1)
+        for j in range(0, len(I[i]) - len(T[0]), stride):
+            cur = I[i:i + len(T), j:j + len(T[0]), :]
+            c1 = np.dot(cur[:, :, 0].flatten(), fc1)
+            c2 = np.dot(cur[:, :, 1].flatten(), fc2)
+            c3 = np.dot(cur[:, :, 2].flatten(), fc3)
+            tmp.append([c1, c2, c3])
         heatmap.append(tmp)
 
     return np.array(heatmap)
@@ -78,7 +79,7 @@ def predict_boxes(heatmap):
     points = []
     for i in range(len(heatmap)):
         for j in range(len(heatmap[i])):
-            if heatmap[i][j] > 0.9:
+            if heatmap[i][j][1] < 0.4*heatmap[i][j][0] and heatmap[i][j][2] < 0.4*heatmap[i][j][0]:
                 points.append((i, j))
         
     points = np.array(points)
@@ -87,8 +88,8 @@ def predict_boxes(heatmap):
         return []
 
     bbox = []
-    ctrs, conf = kmeans(points, 15)
-    bsize = (10, 10)
+    ctrs, conf = kmeans(points, 6)
+    bsize = (120, 120)
     for c in range(len(ctrs)):
         center = ctrs[c]
         bbox.append([center[1] - bsize[0]/2, center[0] - bsize[1]/2,
@@ -100,30 +101,7 @@ def normalize(I):
     return (I - np.min(I))/(np.max(I) - np.min(I))
 
 def detect_red_light_mf(I, fname, ftr):
-    '''
-    This function takes a numpy array <I> and returns a list <output>.
-    The length of <output> is the number of bounding boxes predicted for <I>. 
-    Each entry of <output> is a list <[row_TL,col_TL,row_BR,col_BR,score]>. 
-    The first four entries are four integers specifying a bounding box 
-    (the row and column index of the top left corner and the row and column 
-    index of the bottom right corner).
-    <score> is a confidence score ranging from 0 to 1. 
-
-    Note that PIL loads images in RGB order, so:
-    I[:,:,0] is the red channel
-    I[:,:,1] is the green channel
-    I[:,:,2] is the blue channel
-    '''
-
-    I = normalize(I[:, :, 0])
-    
-    heatmap = normalize(compute_convolution(I, ftr[:, :, 0]))
-    iters = 1
-    for it in range(iters):
-        heatmap = normalize(compute_convolution(heatmap, ftr[:, :, 0]))
-    hmg = heatmap * 255
-    tmp = Image.fromarray(hmg.astype(np.uint8), 'L')
-    tmp.save(fname)
+    heatmap = compute_convolution(I, ftr)
     output = predict_boxes(heatmap)
 
     for i in range(len(output)):
@@ -132,11 +110,7 @@ def detect_red_light_mf(I, fname, ftr):
 
     return output
 
-# Note that you are not allowed to use test data for training.
-# set the path to the downloaded data:
 data_path = '../data/RedLights2011_Medium'
-
-# load splits: 
 split_path = '../data/hw02_splits'
 file_names_train = np.load(os.path.join(split_path,'file_names_train.npy'))
 file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
@@ -153,8 +127,9 @@ Make predictions on the training set.
 '''
 preds_train = {}
 
-ftr = Image.open('f2.png').resize((10, 10))
-ftr = np.asarray(ftr)
+ftr = Image.open('f1.png')
+ftr = ftr.resize((4, 11))
+ftr = np.array(ftr)
 
 def fnametmt(fname):
     global ftr
