@@ -46,17 +46,20 @@ def compute_counts(preds, gts, iou_thr, conf_thr):
 
         mbox = [False for _ in range(len(boxes))]
         mgt = [False for _ in range(len(gt))]
-        
-        for i in range(len(gt)):
-            for j in range(len(boxes)):
-                if boxes[j][4] < conf_thr:
-                    mbox[j] = True
-                    continue
-                iou = compute_iou(gt[i], boxes[j][:4])
-                if iou > iou_thr:
-                    TP += 1
-                    mbox[j] = True
-                    mgt[i] = True
+
+        for i in range(len(boxes)):
+            box = boxes[i]
+            if box[4] < conf_thr:
+                mbox[i] = -1
+            else:
+                for j in range(len(gt)):
+                    ngt = [gt[j][1], gt[j][3], gt[j][0], gt[j][2]]
+                    iou = compute_iou(ngt, box[0:4])
+                    if iou > iou_thr:
+                        TP += 1
+                        mbox[i] = True
+                        mgt[j] = True
+                    
         for i in mbox:
             if i == False:
                 FP += 1
@@ -64,7 +67,6 @@ def compute_counts(preds, gts, iou_thr, conf_thr):
             if i == False:
                 FN += 1
 
-    print(TP, FP, FN)
     return TP, FP, FN
 
 # set a path for predictions and annotations:
@@ -95,10 +97,10 @@ if done_tweaking:
     '''
     
     with open(os.path.join(preds_path,'preds_test.json'),'r') as f:
-        preds_test = json.load(f)
+        preds_train = json.load(f)
         
     with open(os.path.join(gts_path, 'annotations_test.json'),'r') as f:
-        gts_test = json.load(f)
+        gts_train = json.load(f)
 
 
 # For a fixed IoU threshold, vary the confidence thresholds.
@@ -109,26 +111,32 @@ for fname in preds_train:
     for i in preds_train[fname]:
         total.append(i[4])
 
-confidence_thrs = np.array(sorted(list(set(total))))#np.sort(np.array([preds_train[fname][4] for fname in preds_train],dtype=float)) # using (ascending) list of confidence scores as thresholds
-plt.plot(confidence_thrs)
-tp_train = np.zeros(len(confidence_thrs))
-fp_train = np.zeros(len(confidence_thrs))
-fn_train = np.zeros(len(confidence_thrs))
-for i, conf_thr in enumerate(confidence_thrs):
-    print(conf_thr)
-    tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=0.0, conf_thr=conf_thr)
+confidence_thrs = np.array(sorted(list(total)))#np.sort(np.array([preds_train[fname][4] for fname in preds_train],dtype=float)) # using (ascending) list of confidence scores as thresholds
+
+
+color = {0:'black', 0.25: 'red', 0.5: 'blue', 0.75: 'green'}
+
+for iou_thr in (0, 0.25, 0.5, 0.75):
+    tp_train = np.zeros(len(confidence_thrs))
+    fp_train = np.zeros(len(confidence_thrs))
+    fn_train = np.zeros(len(confidence_thrs))
+
+    for i, conf_thr in enumerate(confidence_thrs):
+        tp_train[i], fp_train[i], fn_train[i] = compute_counts(preds_train, gts_train, iou_thr=iou_thr, conf_thr=conf_thr)
+
+    P = []
+    R = []
+
+    for i in range(len(confidence_thrs)):
+        P.append(tp_train[i]/(tp_train[i] + fp_train[i]))
+        R.append(tp_train[i]/(tp_train[i] + fn_train[i]))
+
+    plt.plot(R, P, color=color[iou_thr])
+
+plt.title("RP curve, IOU/color: 0/black, 0.25/red, 0.5/blue, 0.75/green")
+plt.ylabel("Recall")
+plt.xlabel("Precision")
     
-# Plot training set PR curves
-P = []
-R = []
-
-for i in range(len(confidence_thrs)):
-    P.append(tp_train[i]/(tp_train[i] + fp_train[i]))
-    R.append(tp_train[i]/(tp_train[i] + fn_train[i]))
-
-plt.clf()
-plt.cla()
-plt.plot(R, P)
 plt.savefig('test.png')
 
 
